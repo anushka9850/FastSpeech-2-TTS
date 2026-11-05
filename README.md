@@ -1,23 +1,77 @@
-# FastSpeech 2 TTS — English (Svarah) and Telugu (IndicTTS)
+<div align="center">
 
-This project implements a FastSpeech 2 text-to-speech pipeline for English and Telugu using the reference
-implementation from [ming024/FastSpeech2](https://github.com/ming024/FastSpeech2) and the paper
-[FastSpeech 2: Fast and High-Quality End-to-End Text to Speech](https://arxiv.org/abs/2006.04558).
+# 🎙️ FastSpeech 2 TTS — English & Telugu
 
-This is a command-line project only. There is no dashboard or web UI required. The full workflow is run from the terminal using Python scripts.
+**A command-line text-to-speech pipeline for English (Svarah) and Telugu (IndicTTS), built on FastSpeech 2.**
 
-The repository includes:
-- separate English and Telugu preprocessing, training, and inference code
-- language-specific configuration files
-- checkpoint handling
-- loss plotting, inference output generation, variance-adaptor plots
-- technical report generation support
+[![Paper](https://img.shields.io/badge/arXiv-2006.04558-b31b1b.svg)](https://arxiv.org/abs/2006.04558)
+[![Reference](https://img.shields.io/badge/reference-ming024%2FFastSpeech2-181717?logo=github)](https://github.com/ming024/FastSpeech2)
+![Languages](https://img.shields.io/badge/languages-English%20%7C%20Telugu-blue)
+![Interface](https://img.shields.io/badge/interface-CLI-informational)
 
+[Overview](#-overview) •
+[Pipeline](#-pipeline-at-a-glance) •
+[Quick Start](#-quick-start) •
+[Workflow](#-step-by-step-workflow) •
+[Outputs](#-outputs) •
+[Checklist](#-assignment-checklist) •
+[FAQ](#-faq--troubleshooting)
+
+</div>
+
+---
+
+## 📌 Overview
+
+This project implements an end-to-end **FastSpeech 2** text-to-speech system for two languages, following the paper
+[*FastSpeech 2: Fast and High-Quality End-to-End Text to Speech*](https://arxiv.org/abs/2006.04558) and the reference
+implementation at [ming024/FastSpeech2](https://github.com/ming024/FastSpeech2).
+
+| | English | Telugu |
+|---|---|---|
+| **Dataset** | Svarah | IndicTTS Telugu |
+| **Preprocess** | `python English/preprocess.py` | `python Telugu/preprocess.py` |
+| **Train** | `python English/train.py` | `python Telugu/train.py` |
+| **Infer** | `python English/inference.py` | `python Telugu/inference.py` |
+| **Results** | `Results/English/` | `Results/Telugu/` |
+
+**What's included**
+
+- 🔤 Separate, language-specific preprocessing, training, and inference scripts
+- ⚙️ Per-language `config.yaml` files
+- 💾 Checkpoint saving and resumable training
+- 📈 Training/validation loss plots
+- 🔊 Synthesized audio for the required test sentences
+- 🎚️ Variance-adaptor plots for **duration**, **pitch (F0)**, and **energy**
+- 📄 Automated technical report generation (PDF)
+
+> [!NOTE]
+> This is a **command-line project**. No dashboard or web UI is required — every step runs from the terminal.
+
+---
+
+## 🔁 Pipeline at a Glance
+
+```mermaid
+flowchart LR
+    A[📂 Raw Dataset<br/>Svarah / IndicTTS] --> B[🧹 Preprocess<br/>filter · normalize · split]
+    B --> C[🧠 Train<br/>FastSpeech 2]
+    C --> D[💾 Checkpoints]
+    D --> E[🔊 Inference<br/>+ HiFi-GAN vocoder]
+    E --> F[🎧 Audio samples]
+    E --> G[📊 Variance-adaptor plots]
+    C --> H[📈 Loss curves]
+    F & G & H --> I[📄 Technical Report]
 ```
+
+<details>
+<summary><b>📁 Repository structure</b> (click to expand)</summary>
+
+```text
 project/
-├── English/                   preprocess.py  train.py  inference.py  config.yaml  checkpoints/
-├── Telugu/                    preprocess.py  train.py  inference.py  config.yaml  checkpoints/
-├── fs2/                      shared FastSpeech 2 package (model, aligner, front-ends, pipeline)
+├── English/          preprocess.py · train.py · inference.py · config.yaml · checkpoints/
+├── Telugu/           preprocess.py · train.py · inference.py · config.yaml · checkpoints/
+├── fs2/              Shared FastSpeech 2 package (model, aligner, front-ends, pipeline)
 │   ├── transformer/
 │   ├── hifigan/
 │   ├── model/
@@ -26,7 +80,7 @@ project/
 │   ├── English/
 │   └── Telugu/
 ├── Report/
-├── scripts/
+├── scripts/          smoke_test.py · make_report.py
 ├── test_sentences/
 ├── docs/
 ├── README.md
@@ -34,96 +88,121 @@ project/
 └── .gitignore
 ```
 
-## 1. Project goals
+</details>
 
-This assignment requires:
-- training one FastSpeech 2 model for English using Svarah
-- training one FastSpeech 2 model for Telugu using IndicTTS Telugu
-- keeping train/validation data separate without overlap
-- generating speech samples for the required test sentences
-- plotting duration, pitch (F0), and energy predictions from the variance adaptor
-- producing a technical report explaining the implementation and results
+---
 
-## 2. Setup
+## 🚀 Quick Start
+
+### 1. Create the environment
 
 ```bash
 python -m venv .venv
-# Windows PowerShell
+```
+
+<details open>
+<summary><b>🪟 Windows (PowerShell)</b></summary>
+
+```powershell
 .\.venv\Scripts\Activate.ps1
+```
 
-# Linux/macOS
-# source .venv/bin/activate
+</details>
 
+<details>
+<summary><b>🐧 Linux / 🍎 macOS</b></summary>
+
+```bash
+source .venv/bin/activate
+```
+
+</details>
+
+### 2. Install dependencies
+
+```bash
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 python -c "import nltk; [nltk.download(p) for p in ('averaged_perceptron_tagger_eng','averaged_perceptron_tagger','cmudict')]"
 ```
 
-If you are using Hugging Face datasets, also authenticate:
+### 3. (Optional) Authenticate with Hugging Face
+
+Required only if you load datasets from the Hugging Face Hub:
 
 ```bash
 huggingface-cli login
 ```
 
-## 3. Quick validation
+### 4. Verify the installation ✅
 
-This project includes a smoke test that verifies the end-to-end pipeline without requiring full real-world dataset training.
+Run the smoke test to confirm the full pipeline works end-to-end — without needing full dataset training:
 
 ```bash
 python scripts/smoke_test.py
 ```
 
-This is the fastest way to confirm that preprocessing, training, inference, and output generation all work in the current environment.
+> [!TIP]
+> Run the smoke test first. It's the fastest way to confirm that preprocessing, training, inference, and output
+> generation all work in your environment before committing to a long training run.
 
-## 4. Data preparation and preprocessing
+---
 
-| Language | Dataset | Command |
-|---|---|---|
-| English | Svarah | `python English/preprocess.py` |
-| Telugu | IndicTTS Telugu | `python Telugu/preprocess.py` |
+## 🧭 Step-by-Step Workflow
 
-The preprocessing pipeline:
-- loads the dataset
-- filters invalid or unsuitable utterances
-- performs the language-specific text normalization
-- splits data into train and validation sets without overlap
-- extracts robust features for training
-- writes processed data for model training
+### Step 1 — Preprocess the data
 
-## 5. Training
+```bash
+python English/preprocess.py
+python Telugu/preprocess.py
+```
+
+<details>
+<summary>What happens during preprocessing?</summary>
+
+1. **Load** the dataset
+2. **Filter** invalid or unsuitable utterances
+3. **Normalize** text using language-specific rules
+4. **Split** into train and validation sets — with **no overlap**
+5. **Extract** robust acoustic features for training
+6. **Write** processed data for model training
+
+</details>
+
+### Step 2 — Train the models
 
 ```bash
 python English/train.py
 python Telugu/train.py
 ```
 
-Optional:
+Resume an interrupted run from the latest checkpoint:
 
 ```bash
 python English/train.py --resume
 python Telugu/train.py --resume
 ```
 
-Training outputs include:
-- checkpoints under each language folder
-- validation and training loss logs
-- loss plots saved under `Results/<Language>/`
+| Output | Location |
+|---|---|
+| Checkpoints | `English/checkpoints/`, `Telugu/checkpoints/` |
+| Training & validation loss logs | Per-language folders |
+| Loss plots | `Results/<Language>/` |
 
-## 6. Inference and variance-adaptor analysis
+### Step 3 — Run inference & variance-adaptor analysis
 
 ```bash
 python English/inference.py
 python Telugu/inference.py
 ```
 
-This generates:
-- speech files under `Results/<Language>/test_generated_audios/`
-- duration, pitch, and energy plots under `Results/<Language>/variance_adaptor_plots/`
-- per-sentence metadata values for analysis
+| Output | Location |
+|---|---|
+| 🔊 Synthesized speech | `Results/<Language>/test_generated_audios/` |
+| 📊 Duration / pitch / energy plots | `Results/<Language>/variance_adaptor_plots/` |
+| 🗂️ Per-sentence metadata | Generated alongside outputs for analysis |
 
-## 7. Report generation
-
-After generating the required outputs, create the technical report:
+### Step 4 — Generate the technical report
 
 ```bash
 pip install playwright
@@ -131,10 +210,11 @@ playwright install chromium
 python scripts/make_report.py
 ```
 
-The report is written to:
-- `Report/Technical_Report.pdf`
+📄 Output: **`Report/Technical_Report.pdf`**
 
-## 8. Results folder structure
+---
+
+## 📦 Outputs
 
 ```text
 Results/
@@ -156,23 +236,82 @@ Results/
         └── energy/
 ```
 
-## 9. Notes for assignment completion
+---
 
-To fully satisfy the assignment deliverables from the PDF:
-- use the real Svarah and IndicTTS Telugu datasets
-- run the actual preprocessing and training commands for both languages
-- save all checkpoints, generated audio, loss plots, and variance-adaptor plots
-- keep the repository structure aligned with the project specification
-- upload the trained checkpoints or provide accessible external links if GitHub file-size limits apply
+## ✅ Assignment Checklist
 
-## 10. License and acknowledgements
+Track your progress toward the full set of deliverables:
 
-This project builds on the FastSpeech 2 reference implementation and other open-source components.
+- [ ] Environment set up and `scripts/smoke_test.py` passes
+- [ ] **English:** Svarah dataset preprocessed (train/val split, no overlap)
+- [ ] **Telugu:** IndicTTS Telugu dataset preprocessed (train/val split, no overlap)
+- [ ] **English:** FastSpeech 2 model trained, checkpoints saved
+- [ ] **Telugu:** FastSpeech 2 model trained, checkpoints saved
+- [ ] Training and validation loss plots generated for both languages
+- [ ] Speech samples generated for all required test sentences
+- [ ] Duration, pitch (F0), and energy plots generated for both languages
+- [ ] `Report/Technical_Report.pdf` generated
+- [ ] Trained checkpoints uploaded (or external links provided if GitHub size limits apply)
 
-References:
-- FastSpeech 2 paper
-- ming024/FastSpeech2 repository
-- HiFi-GAN reference implementation
-- Noto Sans Telugu font used in the report
+> [!IMPORTANT]
+> Full completion requires training on the **real** Svarah and IndicTTS Telugu datasets. The smoke test only validates
+> that the pipeline runs — it does not produce assignment-quality models.
 
-No dashboard is required for this project; it is designed to run from the command line as a Python TTS pipeline.
+---
+
+## ❓ FAQ & Troubleshooting
+
+<details>
+<summary><b>Dataset download fails or returns an access error</b></summary>
+
+If you're loading from the Hugging Face Hub, make sure you've run `huggingface-cli login` and that your account has
+access to the dataset.
+
+</details>
+
+<details>
+<summary><b>NLTK raises a "resource not found" error</b></summary>
+
+Re-run the NLTK download command from the [Quick Start](#2-install-dependencies). The English front-end needs the
+perceptron tagger and CMU Pronouncing Dictionary.
+
+</details>
+
+<details>
+<summary><b>Training was interrupted</b></summary>
+
+Pass `--resume` to the training script to continue from the latest saved checkpoint.
+
+</details>
+
+<details>
+<summary><b>Report generation fails</b></summary>
+
+`make_report.py` renders the PDF with a headless browser. Confirm that `playwright` is installed and that
+`playwright install chromium` completed successfully.
+
+</details>
+
+<details>
+<summary><b>Checkpoints are too large to push to GitHub</b></summary>
+
+Host them externally (e.g., Google Drive or the Hugging Face Hub) and link them from this README.
+
+</details>
+
+---
+
+## 🙏 Acknowledgements & References
+
+This project builds on the following open-source work:
+
+- **FastSpeech 2** — Ren et al., [*FastSpeech 2: Fast and High-Quality End-to-End Text to Speech*](https://arxiv.org/abs/2006.04558)
+- **Reference implementation** — [ming024/FastSpeech2](https://github.com/ming024/FastSpeech2)
+- **Vocoder** — HiFi-GAN reference implementation
+- **Font** — Noto Sans Telugu (used in the technical report)
+
+<div align="center">
+
+<sub>Built as a command-line Python TTS pipeline · English 🇬🇧 · Telugu 🇮🇳</sub>
+
+</div>
