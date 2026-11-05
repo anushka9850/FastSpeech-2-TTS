@@ -1,0 +1,115 @@
+# FastSpeech 2 - Telugu (IndicTTS Telugu, IIT Madras).  One file = preprocess + model + train.
+language: te
+language_name: Telugu
+
+path:                                   # relative paths are resolved against this folder
+  corpus_path: ../data/corpus/IndicTTS_Telugu  # root of the IIT-M release for --source festival
+  raw_path: ../data/raw/Telugu         # 22.05 kHz trimmed wavs + .lab + train/val.tsv
+  preprocessed_path: ../data/preprocessed/Telugu
+  ckpt_path: ./checkpoints
+  log_path: ../logs/Telugu
+  result_path: ../Results/Telugu
+
+dataset:
+  name: IndicTTS-Telugu
+  source: hf                            # hf | manifest
+  hf_name: SPRINGLab/IndicTTS_Telugu   # 2 speakers (male 4.47 h, female 4.27 h), 48 kHz
+  hf_split: train
+  audio_col: audio
+  text_col: text
+  manifest: null
+  audio_root: null
+
+data:                                   # subsampling (see fs2/selection.py)
+  train_hours: 5.0
+  val_hours: 1.0
+  min_duration: 1.0
+  max_duration: 11.0                    # 11 s * 22050 / 256 = 947 frames < max_seq_len
+  cps_quantiles: [0.01, 0.99]           # speaking-rate outlier filter
+  seed: 1234
+  speakers: null                        # optionally restrict to a list of speaker ids
+
+alignment:
+  method: learned                       # learned (no external aligner) | mfa (paper setting)
+  textgrid_path: ../data/mfa/Telugu/TextGrid
+  prior_scaling: 1.0
+  ctc_loss_weight: 1.0
+  bin_loss_weight: 1.0
+  bin_loss_start_step: 6000
+  bin_loss_warmup_steps: 4000
+
+preprocessing:
+  audio:
+    sampling_rate: 22050
+    trim_top_db: 35
+  stft:
+    filter_length: 1024
+    hop_length: 256
+    win_length: 1024
+  mel:
+    n_mel_channels: 80
+    mel_fmin: 0
+    mel_fmax: 8000                      # must stay 8000 for the pretrained HiFi-GAN
+  pitch:
+    feature: phoneme_level
+    normalization: true
+    f0_min: 60
+    f0_max: 600
+    bin_quantiles: [0.005, 0.995]
+  energy:
+    feature: phoneme_level
+    normalization: true
+
+model:
+  transformer:
+    encoder_layer: 4
+    encoder_head: 2
+    encoder_hidden: 256
+    decoder_layer: 6
+    decoder_head: 2
+    decoder_hidden: 256
+    conv_filter_size: 1024
+    conv_kernel_size: [9, 1]
+    encoder_dropout: 0.2
+    decoder_dropout: 0.2
+  variance_predictor:
+    filter_size: 256
+    kernel_size: 3
+    dropout: 0.5
+  variance_embedding:
+    pitch_quantization: linear
+    energy_quantization: linear
+    n_bins: 256
+  multi_speaker: true                   # male + female voices are both needed to reach 6 h
+  max_seq_len: 1000
+
+optimizer:
+  betas: [0.9, 0.98]
+  eps: 1.0e-9
+  weight_decay: 0.0
+  warm_up_step: 4000
+  anneal_steps: [30000, 40000, 50000]
+  anneal_rate: 0.3
+  lr_scale: 1.0
+
+train:
+  batch_size: 16
+  grad_acc_step: 1
+  grad_clip_thresh: 1.0
+  total_step: 60000                     # ~5 h data: converges in 40-60k steps
+  log_step: 100
+  val_step: 1000
+  save_step: 5000
+  keep_checkpoints: 3
+  num_workers: 4
+  fp16: false
+  early_stop_patience: 0                # 0 = off; N = stop after N validations without improvement
+  seed: 1234
+
+vocoder:
+  model: HiFi-GAN                       # HiFi-GAN | griffin-lim
+  checkpoint: null                      # default: fs2/hifigan/generator_universal.pth.tar(.zip)
+
+inference:
+  speaker: null                         # null = speaker with the most training audio
+  test_sentences: ../test_sentences/telugu.tsv

@@ -1,0 +1,160 @@
+<!doctype html><html><head><meta charset='utf-8'><title>FastSpeech 2 Technical Report</title><style>
+@font-face { font-family: 'Noto Sans Telugu'; src: url('fonts/NotoSansTelugu-Regular.ttf'); }
+@page { size: A4; margin: 16mm 14mm; }
+body { font-family: 'Inter','Segoe UI',Arial,'Noto Sans Telugu',sans-serif; color:#0b0b0b; font-size:10.5pt; line-height:1.45; }
+h1 { font-size:20pt; margin:0 0 4px; } h2 { font-size:14pt; margin:22px 0 8px; border-bottom:1px solid #d9d8d3; padding-bottom:3px; break-after:avoid; }
+h3 { font-size:11.5pt; margin:14px 0 6px; break-after:avoid; } h4 { font-size:10.5pt; margin:10px 0 4px; }
+.sub { color:#52514e; margin-bottom:14px; } .small, .caption { font-size:9pt; color:#52514e; } .pending { color:#b45309; font-style:italic; }
+table { border-collapse:collapse; width:100%; font-size:8.8pt; margin:6px 0 10px; break-inside:auto; }
+th, td { border:1px solid #e0dfda; padding:4px 6px; vertical-align:top; text-align:left; } th { background:#f4f3ef; }
+tr { break-inside:avoid; } .src { font-family:'Noto Sans Telugu','Inter',sans-serif; color:#52514e; font-weight:normal; }
+figure { margin:6px 0; break-inside:avoid; } figure img { width:100%; } figcaption { font-size:8.5pt; color:#52514e; }
+.row2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; } .sent-block { break-inside:avoid-page; margin-bottom:10px; }
+pre { background:#f6f5f1; padding:8px; font-size:8.3pt; white-space:pre-wrap; } code { font-size:9pt; background:#f4f3ef; padding:0 3px; }
+svg.arch { width:100%; height:auto; margin:6px 0; } .status { background:#fff7e6; border:1px solid #f3d19c; padding:8px 10px; font-size:9.5pt; }
+</style></head><body><h1>FastSpeech 2 Text-to-Speech for English and Telugu</h1>
+<div class="sub">Technical report - implementation, training and variance-adaptor analysis. Datasets: Svarah (English), IndicTTS (Telugu).</div>
+<div class='status'><b>Status:</b> results for English, Telugu are not generated yet; sections marked <i>pending</i> fill in automatically when <code>scripts/make_report.py</code> is re-run after preprocessing, training and inference.</div>
+
+<h2>1. Implementation approach</h2>
+<p>The implementation starts from <b>ming024/FastSpeech2</b> (PyTorch), the reference implementation named in the assignment, and follows the
+FastSpeech 2 paper (Ren et al., ICLR 2021): a non-autoregressive Transformer that maps phonemes to mel-spectrograms with explicit
+duration, pitch and energy predictors (the <i>variance adaptor</i>), followed by a pretrained HiFi-GAN vocoder.
+One shared package, <code>fs2/</code>, holds the model and pipeline; <code>English/</code> and <code>Telugu/</code> contain the
+language-specific <code>preprocess.py</code>, <code>train.py</code>, <code>inference.py</code> and <code>config.yaml</code>, so the two
+models are trained completely independently.</p>
+<svg viewBox="0 0 720 300" class="arch" xmlns="http://www.w3.org/2000/svg" font-family="Inter, Arial" font-size="12">
+<defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#52514e"/></marker></defs>
+<g fill="none" stroke="#52514e" stroke-width="1.3">
+<rect x="10" y="125" width="95" height="44" rx="6" fill="#eef4fc"/><rect x="130" y="125" width="95" height="44" rx="6" fill="#eef4fc"/>
+<rect x="250" y="40" width="210" height="215" rx="8" fill="#fbfaf7" stroke-dasharray="4 3"/>
+<rect x="265" y="62" width="180" height="34" rx="6" fill="#fff4ee"/><rect x="265" y="106" width="180" height="34" rx="6" fill="#fff4ee"/>
+<rect x="265" y="150" width="180" height="34" rx="6" fill="#fff4ee"/><rect x="265" y="200" width="180" height="34" rx="6" fill="#eaf7f1"/>
+<rect x="485" y="125" width="95" height="44" rx="6" fill="#eef4fc"/><rect x="605" y="125" width="105" height="44" rx="6" fill="#eef4fc"/>
+<path d="M105 147 H128" marker-end="url(#a)"/><path d="M225 147 H263" marker-end="url(#a)"/><path d="M445 147 H483" marker-end="url(#a)"/>
+<path d="M580 147 H603" marker-end="url(#a)"/><path d="M355 96 V104" marker-end="url(#a)"/><path d="M355 140 V148" marker-end="url(#a)"/><path d="M355 184 V198" marker-end="url(#a)"/>
+<rect x="130" y="230" width="95" height="40" rx="6" fill="#f2f1ee"/><path d="M225 250 H263" marker-end="url(#a)"/>
+</g>
+<g fill="#0b0b0b" text-anchor="middle">
+<text x="57" y="144">Phonemes</text><text x="57" y="160" fill="#52514e">(G2P front-end)</text>
+<text x="177" y="144">Encoder</text><text x="177" y="160" fill="#52514e">4 FFT blocks</text>
+<text x="355" y="56" fill="#52514e">Variance adaptor</text>
+<text x="355" y="84">Duration predictor</text><text x="355" y="128">Pitch predictor + embed</text>
+<text x="355" y="172">Energy predictor + embed</text><text x="355" y="222">Length regulator</text>
+<text x="532" y="144">Decoder</text><text x="532" y="160" fill="#52514e">6 FFT blocks</text>
+<text x="657" y="144">Mel + PostNet</text><text x="657" y="160" fill="#52514e">-> HiFi-GAN</text>
+<text x="177" y="248">Learned aligner</text><text x="177" y="262" fill="#52514e">(train only)</text>
+<text x="70" y="195" fill="#52514e">+ speaker emb.</text>
+</g></svg>
+<p class="caption">Figure 1. FastSpeech 2 as implemented. Encoder/decoder FFT blocks, PostNet and HiFi-GAN are taken unchanged from the reference repository.</p>
+<h3>Components reused from the reference implementation</h3>
+<ul><li><b>Transformer</b> (<code>fs2/transformer/</code>): FFT blocks (multi-head self-attention + 1-D conv feed-forward, kernel [9, 1]), sinusoidal positions, 4 encoder / 6 decoder layers, hidden 256, 2 heads; the only edit is that vocabulary size comes from the language's symbol table.</li>
+<li><b>PostNet</b>: 5 conv layers, 512 channels, residual refinement of the mel.</li>
+<li><b>Variance predictors</b>: 2 x (Conv1D-ReLU-LayerNorm-Dropout) + Linear, 256 quantisation bins for pitch and energy embeddings.</li>
+<li><b>Loss</b>: L1 on mel before and after PostNet, MSE on log-duration, pitch and energy.</li>
+<li><b>Optimiser</b>: Adam (0.9, 0.98, eps 1e-9) with Noam warm-up (4000 steps) and step annealing; gradient clipping 1.0.</li>
+<li><b>Vocoder</b>: the reference repo's pretrained HiFi-GAN <i>universal</i> generator (22.05 kHz, 80 mels, fmax 8 kHz); features are computed with the same STFT settings so no vocoder fine-tuning is needed.</li></ul>
+<h3>Modifications for English and Telugu</h3>
+<table class=""><thead><tr><th>Area</th><th>Reference repo</th><th>This project</th></tr></thead><tbody><tr><td>Text front-end</td><td>English cleaners + g2p_en (CMUdict)</td><td>English: number/time/date normaliser written for the project, acronym spelling, g2p_en with POS-based heteronym disambiguation. Telugu: new rule-based akshara G2P (inherent vowel, virama, matras, homorganic anusvara), Telugu number words incl. ordinals (12వ) and times.</td></tr><tr><td>Symbols</td><td>one global ARPAbet + pinyin table</td><td>per-language symbol table saved with every checkpoint (72 English / 52 Telugu symbols incl. pad, sp, spn).</td></tr><tr><td>Durations</td><td>Montreal Forced Aligner TextGrids</td><td>default: learned aligner trained jointly (beta-binomial prior + forward-sum CTC loss + MAS + bin loss), because MFA has no pretrained Telugu model. MFA remains available (scripts/run_mfa.sh, alignment.method: mfa).</td></tr><tr><td>Pitch / energy</td><td>phoneme-level averages written to disk</td><td>frame-level F0 / energy stored; phoneme averages computed on the fly from whichever durations are used. Bins from robust quantiles of training statistics.</td></tr><tr><td>Variance adaptor</td><td>-</td><td>energy predictor now uses energy control (reference passes the pitch control - bug); vectorised length regulator; minimum one frame per phoneme at inference.</td></tr><tr><td>Data</td><td>LJSpeech / AISHELL3 / LibriTTS loaders</td><td>Svarah and IndicTTS-Telugu loaders (Hugging Face, manifests, Festival txt.done.data), quality filtering and speaker-stratified, text-disjoint 5 h / 1 h split.</td></tr><tr><td>Training</td><td>separate preprocess/model/train YAMLs</td><td>single config.yaml per language, best-validation checkpointing, CSV logs, automatic loss plots, resume, optional fp16 and early stopping.</td></tr><tr><td>Inference</td><td>synthesize.py</td><td>batch synthesis of the test sentences with duration/pitch/energy plots and numeric JSON per sentence; checkpoint is self-contained (symbols, speakers, statistics).</td></tr></tbody></table>
+<h2>2. Datasets, subsampling and preprocessing</h2>
+<p><b>English - Svarah</b> (AI4Bharat): 9.6 h of Indian-accented English from 117 speakers across 65 districts, read and
+extempore speech, released as a single split. No speaker id is published, so a stable pseudo-speaker id is derived from each
+utterance's speaker metadata (gender, age group, native language, state, district, qualification, job, domain).
+<b>Telugu - IndicTTS</b> (IIT Madras): studio recordings of one male (4.47 h) and one female (4.27 h) speaker at 48 kHz.
+Because 6 h cannot come from a single Telugu speaker, both speakers are used with a speaker embedding.</p>
+<p><b>Selection strategy (both languages, <code>fs2/selection.py</code>, seed 1234).</b> (1) keep 1-11 s utterances with a non-empty transcript
+and no annotation tags; (2) drop the 1% slowest and 1% fastest utterances by characters per second - this removes truncated audio and
+transcripts that do not match; (3) group utterances with identical normalised text and always place a group in one split, so no sentence
+occurs in both train and validation (IndicTTS speakers share prompts); (4) give every speaker a share of the 1 h validation and 5 h
+training budgets proportional to their share of the filtered audio, and fill validation first, then training, visiting groups in seeded
+random order. Assertions in the code guarantee zero utterance and zero text overlap.</p>
+<p><b>Preprocessing.</b> Resample to 22.05 kHz mono, trim leading/trailing silence (30 dB English, 35 dB Telugu), peak-normalise;
+text normalisation and G2P (Section 1); 80-bin log-mel (n_fft 1024, hop 256, fmax 8 kHz); F0 with WORLD DIO + StoneMask, unvoiced
+frames linearly interpolated; frame energy = L2 norm of the STFT magnitude; utterances longer than 1000 frames or with fewer frames
+than phonemes are discarded; pitch/energy are z-normalised with training-set statistics.</p>
+<table class=""><thead><tr><th>Language</th><th>Corpus</th><th>After filters</th><th>Speakers</th><th>Train</th><th>Validation</th><th>After feature checks</th></tr></thead><tbody><tr><td>English</td><td>pending</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>Telugu</td><td>pending</td><td></td><td></td><td></td><td></td><td></td></tr></tbody></table>
+<h3>Training configuration</h3>
+<table class=""><thead><tr><th>Model</th><th>Data</th><th>Durations</th><th>Batch</th><th>Steps</th><th>Warm-up</th><th>LR anneal at</th><th>F0 search</th><th>Speaker emb.</th></tr></thead><tbody><tr><td>English</td><td>Svarah</td><td>learned</td><td>16</td><td>60000</td><td>4000</td><td>30000, 40000, 50000</td><td>60-500 Hz</td><td>yes</td></tr><tr><td>Telugu</td><td>IndicTTS-Telugu</td><td>learned</td><td>16</td><td>60000</td><td>4000</td><td>30000, 40000, 50000</td><td>60-600 Hz</td><td>yes</td></tr></tbody></table>
+<p class='small'>Model: 35.6 M parameters (incl. 0.5 M aligner). Peak learning rate 9.9e-4 at step 4000, x0.3 at each anneal step. The checkpoint with the lowest validation mel + PostNet L1 is used for inference.</p><h2>3. Training and validation loss</h2>
+<h3>English</h3>
+<div class="row"><p class="pending">Figure pending: <code>Results/English/training_loss.png</code> not generated yet.</p></div>
+<div class="row"><p class="pending">Figure pending: <code>Results/English/validation_loss.png</code> not generated yet.</p></div>
+<p class='pending'>Pending: run training to generate the loss logs.</p>
+<h3>Telugu</h3>
+<div class="row"><p class="pending">Figure pending: <code>Results/Telugu/training_loss.png</code> not generated yet.</p></div>
+<div class="row"><p class="pending">Figure pending: <code>Results/Telugu/validation_loss.png</code> not generated yet.</p></div>
+<p class='pending'>Pending: run training to generate the loss logs.</p><h2>4. Generated speech - observations per test sentence</h2>
+<p>Audio files are in <code>Results/&lt;Language&gt;/test_generated_audios/</code>. Measured quantities come from the model's own predictions; listening notes (pronunciation, naturalness, artefacts) are the author's, recorded in <code>Report/observations_&lt;Language&gt;.md</code>.</p>
+<h3>English</h3>
+<p class='pending'>Pending: run inference.</p>
+<h3>Telugu</h3>
+<p class='pending'>Pending: run inference.</p><h2>5. Variance-adaptor analysis (duration, F0, energy)</h2>
+<p>For each test sentence the plots show the <i>predicted</i> values: duration in frames per phoneme (1 frame = 11.6 ms; grey bars are pauses), F0 in Hz after de-normalisation, and frame energy. The top panel of the pitch and energy figures is the frame-level contour the decoder actually receives after length regulation; the lower panel is the per-phoneme predictor output.</p>
+<h3>English</h3>
+<p class='pending'>Pending: run inference.</p>
+<h3>Telugu</h3>
+<p class='pending'>Pending: run inference.</p>
+<h2>6. English vs Telugu - comparison, limitations, improvements</h2>
+<table class=""><thead><tr><th>Model</th><th>Speakers</th><th>Best val mel+PostNet L1</th><th>Val duration</th><th>Val pitch</th><th>Phonemes/s (tests)</th><th>Mean F0 range / sentence</th></tr></thead><tbody><tr><td>English</td><td>-</td><td>pending</td><td>-</td><td>-</td><td>-</td><td>-</td></tr><tr><td>Telugu</td><td>-</td><td>pending</td><td>-</td><td>-</td><td>-</td><td>-</td></tr></tbody></table>
+<p><b>Data.</b> Telugu has two studio speakers reading prepared text; Svarah spreads 6 h over ~117 speakers with varied microphones,
+accents and partly extempore speech, so each English speaker contributes only a few minutes. Expect the Telugu model to reach a lower
+mel loss and sound cleaner and more consistent, while the English model averages over speakers (flatter prosody, occasional
+speaker drift) - a property of the data rather than the architecture.</p>
+<p><b>Front-end.</b> Telugu spelling is close to phonemic, so the rule-based G2P is reliable for native words; its weak points are loan
+words written in Telugu script (T1: schwa deletion and English vowel qualities are not modelled) and the homograph పట్టు (T2), which no
+grapheme-level model can resolve. English depends on CMUdict plus a neural G2P: it handles the heteronym pair (E2) through POS tagging,
+but must guess OOV words (E1 is in CMUdict; 'rhyth', 'andaroo' are not) and is defeated by the malformed token in E3, while the same
+error in Telugu (T3) is harmless because spaces are not pronounced.</p>
+<p><b>Numbers.</b> Both front-ends expand the date/time sentences (E4, T4) deterministically; Telugu needs inflected forms
+(వేల vs వేలు, the ordinal పన్నెండవ), which a naive digit-to-word mapping gets wrong.</p>
+<p><b>Limitations.</b> ~5 h per language is about a fifth of LJSpeech, so expect some mumbling on long or rare words, limited prosodic
+variety and occasional duration errors; the universal HiFi-GAN is not fine-tuned to these voices (slight buzz/metallic artefacts);
+learned alignments can be imprecise on very short phonemes; global pitch normalisation is shared between male and female voices.</p>
+<p><b>Improvements.</b> (1) fine-tune HiFi-GAN on ground-truth-aligned mels of each corpus; (2) per-speaker pitch normalisation;
+(3) a Telugu lexicon for English loan words and a context-aware homograph model; (4) input text validation (merge stray fragments,
+E3); (5) pretrain on a larger multilingual Indic/English set and fine-tune on the 5 h subsets; (6) MFA durations for English to compare
+with the learned aligner; (7) for Svarah, restrict training to the cleanest read-speech speakers or add a reference encoder for speaker/style.</p>
+
+<h2>7. Reproducibility</h2>
+<p>Python 3.9-3.13, PyTorch 2.x (CUDA recommended; CPU works for inference). Dependencies (<code>requirements.txt</code>):</p>
+<pre># core (tested with Python 3.13, torch 2.15 CPU; any torch &gt;= 2.3 with CUDA is recommended for training)
+torch&gt;=2.3
+numpy&gt;=1.23
+scipy&gt;=1.10
+librosa&gt;=0.10
+soundfile&gt;=0.12
+pyworld&gt;=0.3.4
+numba&gt;=0.57
+g2p_en&gt;=2.1
+nltk&gt;=3.8
+PyYAML&gt;=6.0
+tqdm&gt;=4.65
+matplotlib&gt;=3.7
+# dataset download (Svarah / IndicTTS from Hugging Face)
+datasets&gt;=2.18
+huggingface_hub&gt;=0.22
+# optional: Montreal Forced Aligner TextGrids (alignment.method: mfa)
+tgt&gt;=1.4
+# optional: build Report/Technical_Report.pdf  (then: playwright install chromium)
+playwright&gt;=1.40</pre>
+<pre>pip install -r requirements.txt
+python -c "import nltk; [nltk.download(p) for p in ('averaged_perceptron_tagger_eng','cmudict')]"
+huggingface-cli login                     # Svarah requires accepting its terms on Hugging Face
+
+python scripts/smoke_test.py              # 5-minute end-to-end check on synthetic data
+
+python English/preprocess.py              # select 5 h / 1 h, extract features
+python English/train.py                   # -> English/checkpoints/best.pth.tar, Results/English/*loss.png
+python English/inference.py               # -> Results/English/test_generated_audios, variance_adaptor_plots
+
+python Telugu/preprocess.py               # or: --source festival --corpus_path /path/IndicTTS/Telugu
+python Telugu/train.py
+python Telugu/inference.py
+
+python scripts/make_report.py             # rebuild this report</pre>
+<p>All hyper-parameters live in <code>English/config.yaml</code> and <code>Telugu/config.yaml</code>; seeds are fixed (1234) for data selection,
+shuffling and initialisation. Checkpoints embed the symbol table, speaker table and normalisation statistics, so
+<code>inference.py</code> needs only the checkpoint and the config.</p>
+<h2>References</h2><p class="small">[1] Y. Ren et al., "FastSpeech 2: Fast and High-Quality End-to-End Text to Speech", ICLR 2021.
+[2] C.-M. Chien, ming024/FastSpeech2, GitHub. [3] J. Kong et al., "HiFi-GAN", NeurIPS 2020. [4] R. Badlani et al., "One TTS Alignment
+to Rule Them All", ICASSP 2022. [5] AI4Bharat, Svarah: Indian-accented English benchmark, 2023. [6] IIT Madras, Indic TTS database.</p></body></html>

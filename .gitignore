@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+data/
+logs/
+*.pth.tar.tmp
+fs2/hifigan/generator_universal.pth.tar
